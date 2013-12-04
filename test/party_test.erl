@@ -71,10 +71,12 @@ response_ok(Module, Socket, _, _, _) ->
 
 
 
-response_post(Module, Socket, _Request, _RequestHeaders, RequestBody) ->
+response_post(Module, Socket, Request, _RequestHeaders, RequestBody) ->
     <<"name=", Name/binary>> = RequestBody,
     ResponseBody = <<"hello ", Name/binary>>,
 
+    ?assertEqual({http_request, 'POST', {abs_path, "/hello"}, {1, 1}},
+                  Request),
 
     Module:send(
       Socket,

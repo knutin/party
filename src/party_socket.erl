@@ -110,7 +110,7 @@ request({post, URL, Headers, Body, _Opts}) ->
     AllHeaders = [{<<"Host">>, host(URL)},
                   {<<"Content-Length">>, ?i2b(iolist_size(Body))}
                   | Headers],
-    [<<"GET ">>, path(URL), <<" HTTP/1.1\r\n">>,
+    [<<"POST ">>, path(URL), <<" HTTP/1.1\r\n">>,
      encode_headers(AllHeaders),
      <<"\r\n">>,
      Body].
