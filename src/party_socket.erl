@@ -107,8 +107,9 @@ request({get, URL, Headers, _Opts}) ->
      <<"\r\n">>];
 
 request({post, URL, Headers, Body, _Opts}) ->
-    AllHeaders = [{<<"Host">>, host(URL)},
-                  {<<"Content-Length">>, ?i2b(iolist_size(Body))}
+    AllHeaders = [maybe_set_header(<<"Host">>, host(URL), Headers),
+                  maybe_set_header(<<"Content-Length">>,
+                                   ?i2b(iolist_size(Body)), Headers)
                   | Headers],
     [<<"POST ">>, path(URL), <<" HTTP/1.1\r\n">>,
      encode_headers(AllHeaders),
@@ -185,6 +186,14 @@ find_path(<<"/", _/binary>> = Path) -> Path;
 find_path(<<_, Rest/binary>>)       -> find_path(Rest);
 find_path(<<"">>)                   -> <<"/">>.
 
+
+maybe_set_header(Key, Value, L) ->
+    case lists:keyfind(Key, 1, L) of
+        {Key, _} ->
+            [];
+        false ->
+            {Key, Value}
+    end.
 
 
 encode_headers([])           -> [];
