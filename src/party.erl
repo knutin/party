@@ -18,13 +18,13 @@ connect(Endpoint, NumConnections) ->
     end.
 
 get(URL, Headers, Opts) ->
-    Req = fun (_Name, Pid) ->
-            party_socket:do(Pid, {get, URL, Headers, Opts}, timeout(Opts))
+    Req = fun ({n, l, [gproc_pool, {party_socket, _}, _, Pid]}, _) ->
+                  party_socket:do(Pid, {get, URL, Headers, Opts}, timeout(Opts))
           end,
 
     case gproc_pool:claim(pool_name(endpoint(URL)), Req) of
         {true, Res} ->
-            {ok, Res};
+            Res;
         false ->
             {error, max_concurrency}
 
@@ -33,6 +33,10 @@ get(URL, Headers, Opts) ->
 post(URL, Headers, Body, Opts) ->
     ok.
 
+
+%%
+%% HELPERS
+%%
 
 endpoint(<<"http://", DomainPortPath/binary>>) ->
     case binary:split(DomainPortPath, <<":">>) of
@@ -48,9 +52,7 @@ endpoint(<<"http://", DomainPortPath/binary>>) ->
     end.
 
 
-%%
-%% HELPERS
-%%
+
 
 pool_name({_Protocol, _Domain, _Port} = Endpoint) ->
     {party_socket, Endpoint}.

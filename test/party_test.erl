@@ -16,13 +16,16 @@ teardown(_) ->
     application:stop(party).
 
 simple() ->
-    %%Port = webserver:start(gen_tcp, [fun response_ok/5]),
-    %%phttpc:connect(<<"http://localhost:", (?i2b(Port))/binary>>, 1),
-    party:connect(<<"http://google.com:80">>, 1),
+    Port = webserver:start(gen_tcp, [fun response_ok/5]),
+    party:connect(<<"http://localhost:", (?i2b(Port))/binary>>, 1),
+    %%party:connect(<<"http://localhost:8081">>, 1),
+    URL = <<"http://localhost:", (?i2b(Port))/binary, "/hello">>,
+    Host = <<"localhost:", (?i2b(Port))/binary>>,
 
-    error_logger:info_msg("~p~n",
-                          [party:get(<<"http://google.com:80/hello">>,
-                                     [], [])]),
+    ?assertEqual({ok, {{200, <<"OK">>},
+                       [{<<"Content-Length">>, <<"14">>},
+                        {<<"Content-Type">>, <<"text/plain">>}]}},
+                 party:get(URL, [{<<"Host">>, Host}], [])),
 
     ok.
 
@@ -35,4 +38,3 @@ response_ok(Module, Socket, _, _, _) ->
       "Content-type: text/plain\r\nContent-length: 14\r\n\r\n"
       "Great success!").
 
-    
