@@ -33,13 +33,10 @@ init([Endpoint]) ->
       party:pool_name(party:endpoint(Endpoint)), self()),
 
     %% TODO: ssl
-    error_logger:info_msg("connecting to: ~p:~p", [Domain, Port]),
     case gen_tcp:connect(?b2l(Domain), Port, [{active, false}, binary], 1000) of
         {ok, Socket} ->
             inet:setopts(Socket, [{active, once}]),
 
-            error_logger:info_msg("socket connected, endpoint: ~p~n",
-                                  [party:endpoint(Endpoint)]),
             gproc_pool:connect_worker(
               party:pool_name(party:endpoint(Endpoint)), self()),
 
@@ -63,7 +60,6 @@ handle_cast(_Msg, State) ->
 
 handle_info({tcp, Socket, Data}, #state{socket = Socket,
                                         response = undefined} = State) ->
-    error_logger:info_msg("building new response, buf: ~p~n", [Data]),
     ok = inet:setopts(Socket, [{active, once}]),
 
     NewBuffer = <<(State#state.buffer)/binary, Data/binary>>,
@@ -95,18 +91,30 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-send_request({get, URL, Headers, Opts}, #state{socket = S} = State) ->
-    AllHeaders = Headers,
-    Request = [<<"GET ">>, path(URL), <<" HTTP/1.1\r\n">>,
-               encode_headers(AllHeaders),
-              <<"\r\n">>],
-
-    case gen_tcp:send(S, Request) of
+send_request(Request, #state{socket = S}) ->
+    case gen_tcp:send(S, request(Request)) of
         ok ->
             ok;
         {error, Reason} ->
             {error, Reason}
     end.
+
+
+request({get, URL, Headers, _Opts}) ->
+    AllHeaders = [{<<"Host">>, host(URL)} | Headers],
+    [<<"GET ">>, path(URL), <<" HTTP/1.1\r\n">>,
+     encode_headers(AllHeaders),
+     <<"\r\n">>];
+
+request({post, URL, Headers, Body, _Opts}) ->
+    AllHeaders = [{<<"Host">>, host(URL)},
+                  {<<"Content-Length">>, ?i2b(iolist_size(Body))}
+                  | Headers],
+    [<<"GET ">>, path(URL), <<" HTTP/1.1\r\n">>,
+     encode_headers(AllHeaders),
+     <<"\r\n">>,
+     Body].
+
 
 handle_response(Buffer, State) ->
     case State#state.parser_state of
@@ -163,6 +171,13 @@ handle_response(Buffer, State) ->
 %% HELPERS
 %%
 
+host(<<"http://", DomainPortPath/binary>>) ->
+    case binary:split(DomainPortPath, <<"/">>) of
+        [D, _Path] -> D;
+        [D] -> D
+    end.
+
+
 path(<<"http://", DomainPortPath/binary>>) ->
     find_path(DomainPortPath).
 
@@ -187,3 +202,7 @@ path_test() ->
     ?assertEqual(<<"/hello/world">>, path(<<"http://foobar.com/hello/world">>)),
     ?assertEqual(<<"/">>, path(<<"http://foobar.com/">>)),
     ?assertEqual(<<"/">>, path(<<"http://foobar.com">>)).
+
+host_test() ->
+    ?assertEqual(<<"localhost:80">>, host(<<"http://localhost:80/foobar">>)),
+    ?assertEqual(<<"localhost:80">>, host(<<"http://localhost:80">>)).
