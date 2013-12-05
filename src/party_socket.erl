@@ -132,7 +132,11 @@ handle_info({timeout, Timer, timeout}, #state{caller = From,
                                               socket = Socket,
                                               timer = Timer} = State) ->
     gen_server:reply(From, {error, timeout}),
-    ok = gen_tcp:close(Socket),
+    if Socket =/= undefined ->
+            ok = gen_tcp:close(Socket);
+       true ->
+            ok
+    end,
     {noreply, State#state{socket = undefined,
                           caller = undefined,
                           parser_state = response,
