@@ -10,11 +10,13 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
+-export([get_socket/1]).
+
 -record(state, {endpoint, socket, caller, response, buffer, parser_state}).
 
-%%%===================================================================
-%%% API
-%%%===================================================================
+%%
+%% API
+%%
 
 start_link(Endpoint) ->
     gen_server:start_link(?MODULE, [Endpoint], []).
@@ -22,9 +24,13 @@ start_link(Endpoint) ->
 do(Pid, Request, Timeout) ->
     gen_server:call(Pid, {do, Request}, Timeout).
 
-%%%===================================================================
-%%% gen_server callbacks
-%%%===================================================================
+
+get_socket(Pid) ->
+    gen_server:call(Pid, get_socket).
+
+%%
+%% gen_server callbacks
+%%
 
 init([Endpoint]) ->
     {_Protocol, Domain, Port} = party:endpoint(Endpoint),
@@ -33,7 +39,7 @@ init([Endpoint]) ->
       party:pool_name(party:endpoint(Endpoint)), self()),
 
     %% TODO: ssl
-    case gen_tcp:connect(?b2l(Domain), Port, [{active, false}, binary], 1000) of
+    case gen_tcp:connect(?b2l(Domain), Port, [{active, false}, binary], 10000) of
         {ok, Socket} ->
             inet:setopts(Socket, [{active, once}]),
 
@@ -49,39 +55,71 @@ init([Endpoint]) ->
     end.
 
 
-handle_call({do, Request}, From, State) ->
-    case send_request(Request, State) of
+handle_call({do, Request}, From, #state{socket = undefined} = State) ->
+    {_Protocol, Domain, Port} = party:endpoint(State#state.endpoint),
+    case gen_tcp:connect(?b2l(Domain), Port, [{active, false}, binary], 10000) of
+        {ok, Socket} ->
+            ok = inet:setopts(Socket, [{active, once}]),
+            case send_request(Request, Socket) of
+                ok ->
+                    {noreply, State#state{caller = From, socket = Socket}}
+            end
+    end;
+
+handle_call({do, Request}, From, #state{socket = Socket} = State) ->
+    case send_request(Request, Socket) of
         ok ->
             {noreply, State#state{caller = From}}
-    end.
+    end;
+
+handle_call(get_socket, _From, State) ->
+    {reply, {ok, State#state.socket}, State}.
+
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info({tcp, Socket, Data}, #state{socket = Socket,
-                                        response = undefined} = State) ->
+handle_info({tcp, Socket, Data}, #state{socket = Socket} = State) ->
     ok = inet:setopts(Socket, [{active, once}]),
 
     NewBuffer = <<(State#state.buffer)/binary, Data/binary>>,
     case handle_response(Data, State#state{buffer = NewBuffer}) of
         {more, NewState} ->
             {noreply, NewState};
-        {response, Response, NewState} ->
+
+        {response, {_, Headers, _} = Response, NewState} ->
             gen_server:reply(NewState#state.caller, {ok, Response}),
+
+            NewSocket = case lists:keyfind(<<"Connection">>, 1, Headers) of
+                            {<<"Connection">>, <<"close">>} ->
+                                ok = gen_tcp:close(Socket),
+                                undefined;
+                            {<<"Connection">>, <<"keep-alive">>} ->
+                                Socket;
+                            false ->
+                                Socket
+                        end,
+
             {noreply, NewState#state{caller = undefined,
                                      response = undefined,
                                      parser_state = response,
+                                     socket = NewSocket,
                                      buffer = <<"">>}}
     end;
 
 handle_info({tcp_closed, Socket}, #state{socket = Socket} = State) ->
-    %% reconnect?
-    {noreply, State}.
+    {noreply, State#state{socket = undefined}}.
 
 
 
 
-terminate(_Reason, _State) ->
+terminate(Reason, State) ->
+    error_logger:info_msg("party_socket(~p) terminating: ~p~n",
+                          [self(), Reason]),
+    Pool = party:pool_name(party:endpoint(State#state.endpoint)),
+    true = gproc_pool:disconnect_worker(Pool, self()),
+    true = gproc_pool:remove_worker(Pool, self()),
+
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -91,8 +129,8 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-send_request(Request, #state{socket = S}) ->
-    case gen_tcp:send(S, request(Request)) of
+send_request(Request, Socket) ->
+    case gen_tcp:send(Socket, request(Request)) of
         ok ->
             ok;
         {error, Reason} ->
@@ -101,7 +139,10 @@ send_request(Request, #state{socket = S}) ->
 
 
 request({get, URL, Headers, _Opts}) ->
-    AllHeaders = [{<<"Host">>, host(URL)} | Headers],
+    AllHeaders = [maybe_set_header(<<"Host">>, host(URL), Headers),
+                  maybe_set_header(<<"Connection">>, connection(), Headers)
+                  | Headers],
+
     [<<"GET ">>, path(URL), <<" HTTP/1.1\r\n">>,
      encode_headers(AllHeaders),
      <<"\r\n">>];
@@ -177,6 +218,9 @@ host(<<"http://", DomainPortPath/binary>>) ->
         [D, _Path] -> D;
         [D] -> D
     end.
+
+connection() ->
+    <<"keep-alive">>.
 
 
 path(<<"http://", DomainPortPath/binary>>) ->

@@ -1,7 +1,7 @@
 %% @doc: Parallel http client
 -module(party).
 -include("party.hrl").
--export([connect/2, get/3, post/4]).
+-export([connect/2, get/3, post/4, disconnect/1]).
 
 -export([pool_name/1, endpoint/1]).
 
@@ -24,6 +24,19 @@ connect(Endpoint, NumConnections) ->
                     {error, {connect, Error}}
             end
     end.
+
+disconnect(Endpoint) ->
+    Pool = pool_name(endpoint(Endpoint)),
+    lists:foreach(fun ({Pid, _}) ->
+                          ok = supervisor:terminate_child(party_socket_sup, Pid)
+                  end, gproc_pool:worker_pool(Pool)),
+    %% error_logger:info_msg("active workers: ~p~n", [gproc_pool:active_workers(Pool)]),
+    %% error_logger:info_msg("workers: ~p~n", [gproc_pool:worker_pool(Pool)]),
+    true = gproc_pool:force_delete(Pool),
+    %% gproc_pool:delete(Pool),
+    %% error_logger:info_msg("~p~n", [ets:tab2list(gproc)]),
+    ok.
+
 
 get(URL, Headers, Opts) ->
     do({get, URL, Headers, Opts}, timeout(Opts)).
