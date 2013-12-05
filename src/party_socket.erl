@@ -12,7 +12,14 @@
 
 -export([get_socket/1]).
 
--record(state, {endpoint, socket, caller, response, buffer, parser_state}).
+-record(state, {endpoint,
+                socket,
+                caller,
+                response,
+                buffer,
+                parser_state,
+                timer
+               }).
 
 %%
 %% API
@@ -62,14 +69,19 @@ handle_call({do, Request}, From, #state{socket = undefined} = State) ->
             ok = inet:setopts(Socket, [{active, once}]),
             case send_request(Request, Socket) of
                 ok ->
-                    {noreply, State#state{caller = From, socket = Socket}}
+                    Timer = start_timer(server_timeout(opts(Request))),
+                    {noreply, State#state{caller = From,
+                                          socket = Socket,
+                                          timer = Timer}}
             end
     end;
 
 handle_call({do, Request}, From, #state{socket = Socket} = State) ->
     case send_request(Request, Socket) of
         ok ->
-            {noreply, State#state{caller = From}}
+            Timer = start_timer(server_timeout(opts(Request))),
+            {noreply, State#state{caller = From,
+                                 timer = Timer}}
     end;
 
 handle_call(get_socket, _From, State) ->
@@ -79,13 +91,18 @@ handle_call(get_socket, _From, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info({tcp, Socket, Data}, #state{socket = Socket} = State) ->
+handle_info({tcp, Socket, Data}, #state{socket = Socket, timer = Timer} = State) ->
+    if Timer =:= undefined ->
+            ok;
+       true ->
+            erlang:cancel_timer(Timer)
+    end,
     ok = inet:setopts(Socket, [{active, once}]),
 
     NewBuffer = <<(State#state.buffer)/binary, Data/binary>>,
     case handle_response(Data, State#state{buffer = NewBuffer}) of
         {more, NewState} ->
-            {noreply, NewState};
+            {noreply, NewState#state{timer = undefined}};
 
         {response, {_, Headers, _} = Response, NewState} ->
             gen_server:reply(NewState#state.caller, {ok, Response}),
@@ -104,11 +121,24 @@ handle_info({tcp, Socket, Data}, #state{socket = Socket} = State) ->
                                      response = undefined,
                                      parser_state = response,
                                      socket = NewSocket,
+                                     timer = undefined,
                                      buffer = <<"">>}}
     end;
 
 handle_info({tcp_closed, Socket}, #state{socket = Socket} = State) ->
-    {noreply, State#state{socket = undefined}}.
+    {noreply, State#state{socket = undefined}};
+
+handle_info({timeout, Timer, timeout}, #state{caller = From,
+                                              socket = Socket,
+                                              timer = Timer} = State) ->
+    gen_server:reply(From, {error, timeout}),
+    ok = gen_tcp:close(Socket),
+    {noreply, State#state{socket = undefined,
+                          caller = undefined,
+                          parser_state = response,
+                          response = undefined,
+                          buffer = <<"">>}}.
+
 
 
 
@@ -243,6 +273,16 @@ maybe_set_header(Key, Value, L) ->
 encode_headers([])           -> [];
 encode_headers([[] | H])     -> encode_headers(H);
 encode_headers([{K, V} | H]) -> [K, <<": ">>, V, <<"\r\n">>, encode_headers(H)].
+
+
+opts({post, _, _, _, Opts}) -> Opts;
+opts({get, _, _, Opts})      -> Opts.
+
+server_timeout(Opts) -> proplists:get_value(server_timeout, Opts, 30000).
+
+
+start_timer(Timeout) ->
+    erlang:start_timer(Timeout, self(), timeout).
 
 
 %%

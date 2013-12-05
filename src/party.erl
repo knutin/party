@@ -39,10 +39,10 @@ disconnect(Endpoint) ->
 
 
 get(URL, Headers, Opts) ->
-    do({get, URL, Headers, Opts}, timeout(Opts)).
+    do({get, URL, Headers, Opts}, call_timeout(Opts)).
 
 post(URL, Headers, Body, Opts) ->
-    do({post, URL, Headers, Body, Opts}, timeout(Opts)).
+    do({post, URL, Headers, Body, Opts}, call_timeout(Opts)).
 
 
 do(Request, Timeout) ->
@@ -82,5 +82,5 @@ url({post, URL, _, _, _}) -> URL.
 pool_name({_Protocol, _Domain, _Port} = Endpoint) ->
     {party_socket, Endpoint}.
 
-timeout(Opts) -> proplists:get_value(timeout, Opts, 5000).
+call_timeout(Opts) -> proplists:get_value(call_timeout, Opts, 5000).
     

@@ -8,13 +8,17 @@ integration_test_() ->
       ?_test(simple()),
       ?_test(post()),
       ?_test(large_response()),
-      ?_test(reconnect())
-      %% ?_test(concurrency())
+      ?_test(reconnect()),
+      ?_test(timeout()),
+      ?_test(concurrency())
      ]}.
 
 setup() ->
     application:start(sasl),
-    application:start(party).
+    application:start(party),
+    URL = <<"http://dynamodb.us-east-1.amazonaws.com/">>,
+    ok = party:connect(URL, 2),
+    ok.
 
 teardown(_) ->
     application:stop(party).
@@ -61,8 +65,7 @@ large_response() ->
 
 reconnect() ->
     URL = <<"http://dynamodb.us-east-1.amazonaws.com/">>,
-    ok = party:connect(URL, 1),
-    [{_, Pid, _, _}] = supervisor:which_children(party_socket_sup),
+    [{_, Pid, _, _}, _] = supervisor:which_children(party_socket_sup),
 
     {ok, Socket1} = party_socket:get_socket(Pid),
 
@@ -81,28 +84,34 @@ reconnect() ->
     {ok, Socket2} = party_socket:get_socket(Pid),
     ?assertNotEqual(Socket1, Socket2),
     ?assertMatch({ok, {{400, _}, _, _}}, party:post(URL, Close, [], [])),
-    ?assertEqual({ok, Socket2}, party_socket:get_socket(Pid)),
+    ?assertEqual({ok, Socket2}, party_socket:get_socket(Pid)).
 
-    ok = party:disconnect(URL).
+
+
+
+timeout() ->
+    URL = <<"http://dynamodb.us-east-1.amazonaws.com/">>,
+
+    ?assertEqual({error, timeout}, party:post(URL, [], [],
+                                              [{server_timeout, 0},
+                                               {call_timeout, 1000}])).
 
 
 
 concurrency() ->
     URL = <<"http://dynamodb.us-east-1.amazonaws.com/">>,
-    ok = party:connect(URL, 1),
-
     Parent = self(),
     spawn(fun () ->
-                  Parent ! {self(), party:get(URL, [], [])}
+                  Parent ! {self(), party:post(URL, [], [], [])}
           end),
 
     spawn(fun () ->
-                  Parent ! {self(), party:get(URL, [], [])}
+                  Parent ! {self(), party:post(URL, [], [], [])}
           end),
 
-    receive M1 -> ?assertMatch({_, {ok, {{302, _}, _, _}}}, M1) end,
-    receive M2 -> ?assertMatch({_, {ok, {{302, _}, _, _}}}, M2) end,
-    ok = party:disconnect(URL).
+    receive M1 -> ?assertMatch({_, {ok, {{400, _}, _, _}}}, M1) end,
+    receive M2 -> ?assertMatch({_, {ok, {{400, _}, _, _}}}, M2) end.
+
 
 
 %%
