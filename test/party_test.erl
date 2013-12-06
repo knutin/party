@@ -9,7 +9,8 @@ integration_test_() ->
       ?_test(post()),
       ?_test(large_response()),
       ?_test(reconnect()),
-      ?_test(timeout()),
+      ?_test(server_timeout()),
+      ?_test(worker_busy()),
       ?_test(concurrency())
      ]}.
 
@@ -86,19 +87,35 @@ reconnect() ->
 
 
 
-
-timeout() ->
+server_timeout() ->
     URL = <<"http://dynamodb.us-east-1.amazonaws.com/">>,
-
+    ok = party:connect(URL, 1),
     ?assertEqual({error, timeout}, party:post(URL, [], [],
                                               [{server_timeout, 0},
-                                               {call_timeout, 1000}])).
+                                               {call_timeout, 1000}])),
+    ok = party:disconnect(ignored).
+
+worker_busy() ->
+    Port = webserver:start(gen_tcp, [fun response_slow/5,
+                                     fun response_slow/5]),
+    ok = party:connect(<<"http://localhost:", (?i2b(Port))/binary>>, 1),
+    URL = <<"http://localhost:", (?i2b(Port))/binary, "/hello">>,
+
+    ?assertEqual({error, timeout}, party:post(URL, [], <<"sleep=200">>,
+                                              [{server_timeout, 1000},
+                                               {call_timeout, 0}])),
+
+    ?assertEqual({error, busy}, party:post(URL, [], <<"sleep=2000">>,
+                                           [{server_timeout, 1000},
+                                            {call_timeout, 1000}])),
+    ok = party:disconnect(ignored).
 
 
 
 
 concurrency() ->
     URL = <<"http://dynamodb.us-east-1.amazonaws.com/">>,
+    ok = party:connect(URL, 2),
     Parent = self(),
     spawn(fun () ->
                   Parent ! {self(), party:post(URL, [], [], [])}
@@ -154,8 +171,19 @@ response_large(Module, Socket, _, _, _) ->
        ResponseBody]).
 
 response_close(Module, Socket, _, Headers, _) ->
-    error_logger:info_msg("~p~n", [Headers]),
     ?assertEqual("keep-alive", proplists:get_value("Connection", Headers)),
+    Module:send(
+      Socket,
+      ["HTTP/1.1 200 OK\r\n",
+       "Content-type: text/plain\r\n",
+       "Content-length: 14\r\n",
+       "Connection: close\r\n",
+       "\r\n"
+       "Great success!"]).
+
+response_slow(Module, Socket, _, _, Body) ->
+    <<"sleep=", SleepBin/binary>> = Body,
+    timer:sleep(?b2i(SleepBin)),
     Module:send(
       Socket,
       ["HTTP/1.1 200 OK\r\n",

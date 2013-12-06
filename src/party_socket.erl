@@ -29,7 +29,12 @@ start_link(Endpoint) ->
     gen_server:start_link(?MODULE, [Endpoint], []).
 
 do(Pid, Request, Timeout) ->
-    gen_server:call(Pid, {do, Request}, Timeout).
+    try
+        gen_server:call(Pid, {do, Request}, Timeout)
+    catch
+        exit:{timeout, _} ->
+            {error, timeout}
+    end.
 
 
 is_busy(Pid) ->
@@ -61,29 +66,22 @@ init([Endpoint]) ->
             {stop, Error}
     end.
 
-
-handle_call({do, Request}, From, #state{socket = undefined} = State) ->
-    {_Protocol, Domain, Port} = party:endpoint(State#state.endpoint),
-    case gen_tcp:connect(?b2l(Domain), Port, [{active, false}, binary],
-                         10000) of
+handle_call({do, Request}, From, #state{caller = undefined} = State) ->
+    case maybe_connect(State#state.endpoint, State#state.socket) of
         {ok, Socket} ->
-            ok = inet:setopts(Socket, [{active, once}]),
             case send_request(Request, Socket) of
                 ok ->
                     Timer = start_timer(server_timeout(opts(Request))),
                     {noreply, State#state{caller = From,
-                                          socket = Socket,
-                                          timer = Timer}}
-            end
+                                          timer = Timer,
+                                          socket = Socket}}
+            end;
+        {error, _} = Error ->
+            {reply, Error, State}
     end;
 
-handle_call({do, Request}, From, #state{socket = Socket} = State) ->
-    case send_request(Request, Socket) of
-        ok ->
-            Timer = start_timer(server_timeout(opts(Request))),
-            {noreply, State#state{caller = From,
-                                 timer = Timer}}
-    end;
+handle_call({do, _Request}, _From, State) ->
+    {reply, {error, busy}, State};
 
 handle_call(get_socket, _From, State) ->
     {reply, {ok, State#state.socket}, State};
@@ -95,21 +93,17 @@ handle_call(is_busy, _From, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info({tcp, Socket, Data}, #state{socket = Socket, timer = Timer} = State) ->
-    if Timer =:= undefined ->
-            ok;
-       true ->
-            erlang:cancel_timer(Timer)
-    end,
+handle_info({tcp, Socket, Data}, #state{socket = Socket} = State) ->
     ok = inet:setopts(Socket, [{active, once}]),
 
     NewBuffer = <<(State#state.buffer)/binary, Data/binary>>,
     case handle_response(Data, State#state{buffer = NewBuffer}) of
         {more, NewState} ->
-            {noreply, NewState#state{timer = undefined}};
+            {noreply, NewState};
 
         {response, {_, Headers, _} = Response, NewState} ->
             gen_server:reply(NewState#state.caller, {ok, Response}),
+            erlang:cancel_timer(State#state.timer),
 
             NewSocket = case lists:keyfind(<<"Connection">>, 1, Headers) of
                             {<<"Connection">>, <<"close">>} ->
@@ -132,6 +126,11 @@ handle_info({tcp, Socket, Data}, #state{socket = Socket, timer = Timer} = State)
 handle_info({tcp_closed, Socket}, #state{socket = Socket} = State) ->
     {noreply, State#state{socket = undefined}};
 
+handle_info({timeout, Timer, timeout}, #state{timer = undefined} = State) ->
+    error_logger:info_msg("got timeout from ~p, but don't have timer~n",
+                          [Timer]),
+    {noreply, State};
+
 handle_info({timeout, Timer, timeout}, #state{caller = From,
                                               socket = Socket,
                                               timer = Timer} = State) ->
@@ -152,7 +151,7 @@ handle_info({timeout, Timer, timeout}, #state{caller = From,
 
 
 terminate(Reason, State) ->
-    error_logger:info_msg("party_socket(~p) terminating: ~p~n",
+    error_logger:info_msg("party_socket(~p) terminating:~n~p~n",
                           [self(), Reason]),
     Pool = party:pool_name(party:endpoint(State#state.endpoint)),
     ok = carpool:disconnect(Pool),
@@ -164,6 +163,24 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+maybe_connect(Endpoint, undefined) -> connect(Endpoint);
+maybe_connect(_Endpoint, Socket) -> {ok, Socket}.
+
+connect(Endpoint) ->
+    {_Protocol, Domain, Port} = party:endpoint(Endpoint),
+    case gen_tcp:connect(?b2l(Domain), Port,
+                         [{active, false}, binary],
+                         10000) of
+        {ok, Socket} ->
+            ok = inet:setopts(Socket, [{active, once}]),
+            {ok, Socket};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+
+
 
 send_request(Request, Socket) ->
     case gen_tcp:send(Socket, request(Request)) of
