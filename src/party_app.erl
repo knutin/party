@@ -10,7 +10,7 @@
 %% ===================================================================
 
 start(_StartType, _StartArgs) ->
-    application:start(gproc),
+    application:start(carpool),
     party_sup:start_link().
 
 stop(_State) ->

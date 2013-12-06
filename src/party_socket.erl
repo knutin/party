@@ -42,17 +42,14 @@ get_socket(Pid) ->
 init([Endpoint]) ->
     {_Protocol, Domain, Port} = party:endpoint(Endpoint),
 
-    gproc_pool:add_worker(
-      party:pool_name(party:endpoint(Endpoint)), self()),
-
     %% TODO: ssl
-    case gen_tcp:connect(?b2l(Domain), Port, [{active, false}, binary], 10000) of
+    case gen_tcp:connect(?b2l(Domain), Port,
+                         [{active, false}, binary],
+                         10000) of
         {ok, Socket} ->
             inet:setopts(Socket, [{active, once}]),
 
-            gproc_pool:connect_worker(
-              party:pool_name(party:endpoint(Endpoint)), self()),
-
+            ok = carpool:connect(party:pool_name(party:endpoint(Endpoint))),
             {ok, #state{endpoint = Endpoint,
                         socket = Socket,
                         parser_state = response,
@@ -64,7 +61,8 @@ init([Endpoint]) ->
 
 handle_call({do, Request}, From, #state{socket = undefined} = State) ->
     {_Protocol, Domain, Port} = party:endpoint(State#state.endpoint),
-    case gen_tcp:connect(?b2l(Domain), Port, [{active, false}, binary], 10000) of
+    case gen_tcp:connect(?b2l(Domain), Port, [{active, false}, binary],
+                         10000) of
         {ok, Socket} ->
             ok = inet:setopts(Socket, [{active, once}]),
             case send_request(Request, Socket) of
@@ -151,9 +149,7 @@ terminate(Reason, State) ->
     error_logger:info_msg("party_socket(~p) terminating: ~p~n",
                           [self(), Reason]),
     Pool = party:pool_name(party:endpoint(State#state.endpoint)),
-    true = gproc_pool:disconnect_worker(Pool, self()),
-    true = gproc_pool:remove_worker(Pool, self()),
-
+    ok = carpool:disconnect(Pool),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->

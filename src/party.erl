@@ -6,35 +6,25 @@
 -export([pool_name/1, endpoint/1]).
 
 connect(Endpoint, NumConnections) ->
-    case gproc_pool:new(pool_name(endpoint(Endpoint)), claim,
-                        [{size, NumConnections}]) of
-        ok ->
-            try
-                lists:foreach(fun (_) ->
-                                      case party_socket_sup:connect(Endpoint) of
-                                          {ok, _} ->
-                                              ok;
-                                          Error ->
-                                              throw({connect_error, Error})
-                                      end
-                              end, lists:seq(1, NumConnections)),
-                ok
-            catch
-                throw:{connect_error, Error} ->
-                    {error, {connect, Error}}
-            end
+    try
+        lists:foreach(fun (_) ->
+                              case party_socket_sup:connect(Endpoint) of
+                                  {ok, _} ->
+                                      ok;
+                                  Error ->
+                                      throw({connect_error, Error})
+                              end
+                      end, lists:seq(1, NumConnections)),
+        ok
+    catch
+        throw:{connect_error, Error} ->
+            {error, {connect, Error}}
     end.
 
 disconnect(Endpoint) ->
-    Pool = pool_name(endpoint(Endpoint)),
-    lists:foreach(fun ({Pid, _}) ->
+    lists:foreach(fun ({_, Pid, _, _}) ->
                           ok = supervisor:terminate_child(party_socket_sup, Pid)
-                  end, gproc_pool:worker_pool(Pool)),
-    %% error_logger:info_msg("active workers: ~p~n", [gproc_pool:active_workers(Pool)]),
-    %% error_logger:info_msg("workers: ~p~n", [gproc_pool:worker_pool(Pool)]),
-    true = gproc_pool:force_delete(Pool),
-    %% gproc_pool:delete(Pool),
-    %% error_logger:info_msg("~p~n", [ets:tab2list(gproc)]),
+                  end, supervisor:which_children(party_socket_sup)),
     ok.
 
 
@@ -46,14 +36,15 @@ post(URL, Headers, Body, Opts) ->
 
 
 do(Request, Timeout) ->
-    Req = fun ({n, l, [gproc_pool, {party_socket, _}, _, Pid]}, _) ->
+    Req = fun (Pid) ->
                   party_socket:do(Pid, Request, Timeout)
           end,
-    case gproc_pool:claim(pool_name(endpoint(url(Request))), Req) of
-        {true, Res} ->
+    Pool = pool_name(endpoint(url(Request))),
+    case carpool:claim(Pool, Req, 1000) of
+        {ok, Res} ->
             Res;
-        false ->
-            {error, max_concurrency}
+        {error, timeout} ->
+            {error, timeout}
 
     end.
 

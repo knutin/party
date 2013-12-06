@@ -15,10 +15,7 @@ integration_test_() ->
 
 setup() ->
     application:start(sasl),
-    application:start(party),
-    URL = <<"http://dynamodb.us-east-1.amazonaws.com/">>,
-    ok = party:connect(URL, 2),
-    ok.
+    application:start(party).
 
 teardown(_) ->
     application:stop(party).
@@ -34,7 +31,7 @@ simple() ->
                       <<"Great success!">>}},
                  party:get(URL, [], [])),
 
-    ok = party:disconnect(<<"http://localhost:", (?i2b(Port))/binary>>).
+    ok = party:disconnect(ignored).
 
 
 post() ->
@@ -60,11 +57,12 @@ large_response() ->
     ?assertMatch({ok, {{200, <<"OK">>},
                        _, ExpectedBody}},
                  party:post(URL, [], <<"">>, [])),
-    ok = party:disconnect(<<"http://localhost:", (?i2b(Port))/binary>>).
+    ok = party:disconnect(ignored).
 
 
 reconnect() ->
     URL = <<"http://dynamodb.us-east-1.amazonaws.com/">>,
+    ok = party:connect(URL, 2),
     [{_, Pid, _, _}, _] = supervisor:which_children(party_socket_sup),
 
     {ok, Socket1} = party_socket:get_socket(Pid),
