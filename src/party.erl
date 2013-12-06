@@ -29,22 +29,22 @@ disconnect(Endpoint) ->
 
 
 get(URL, Headers, Opts) ->
-    do({get, URL, Headers, Opts}, call_timeout(Opts)).
+    do({get, URL, Headers, Opts}, Opts).
 
 post(URL, Headers, Body, Opts) ->
-    do({post, URL, Headers, Body, Opts}, call_timeout(Opts)).
+    do({post, URL, Headers, Body, Opts}, Opts).
 
 
-do(Request, Timeout) ->
+do(Request, Opts) ->
     Req = fun (Pid) ->
-                  party_socket:do(Pid, Request, Timeout)
+                  party_socket:do(Pid, Request, call_timeout(Opts))
           end,
     Pool = pool_name(endpoint(url(Request))),
-    case carpool:claim(Pool, Req, 1000) of
+    case carpool:claim(Pool, Req, claim_timeout(Opts)) of
         {ok, Res} ->
             Res;
-        {error, timeout} ->
-            {error, timeout}
+        {error, claim_timeout} ->
+            {error, claim_timeout}
 
     end.
 
@@ -74,4 +74,5 @@ pool_name({_Protocol, _Domain, _Port} = Endpoint) ->
     {party_socket, Endpoint}.
 
 call_timeout(Opts) -> proplists:get_value(call_timeout, Opts, 5000).
+claim_timeout(Opts) -> proplists:get_value(claim_timeout, Opts, 1000).
     
