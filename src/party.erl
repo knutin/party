@@ -3,7 +3,7 @@
 -include("party.hrl").
 -export([connect/2, get/3, post/4, disconnect/1]).
 
--export([pool_name/1, endpoint/1]).
+-export([pool_name/1, endpoint/1, workers/0]).
 
 connect(Endpoint, NumConnections) ->
     try
@@ -45,8 +45,14 @@ do(Request, Opts) ->
             Res;
         {error, claim_timeout} ->
             {error, claim_timeout}
-
     end.
+
+workers() ->
+    lists:map(fun ({_, Pid, _, _}) ->
+                      {ok, State} = party_socket:is_busy(Pid),
+                      {Pid, State}
+              end, supervisor:which_children(party_socket_sup)).
+
 
 
 %%

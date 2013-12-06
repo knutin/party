@@ -30,7 +30,7 @@ simple() ->
                         {<<"Content-Type">>, <<"text/plain">>}],
                       <<"Great success!">>}},
                  party:get(URL, [], [])),
-
+    ?assertMatch([{_, false}], party:workers()),
     ok = party:disconnect(ignored).
 
 
@@ -93,6 +93,7 @@ timeout() ->
     ?assertEqual({error, timeout}, party:post(URL, [], [],
                                               [{server_timeout, 0},
                                                {call_timeout, 1000}])).
+
 
 
 

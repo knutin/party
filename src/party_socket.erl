@@ -4,7 +4,7 @@
 -include("party.hrl").
 
 %% API
--export([start_link/1, do/3]).
+-export([start_link/1, do/3, is_busy/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -31,6 +31,9 @@ start_link(Endpoint) ->
 do(Pid, Request, Timeout) ->
     gen_server:call(Pid, {do, Request}, Timeout).
 
+
+is_busy(Pid) ->
+    gen_server:call(Pid, is_busy).
 
 get_socket(Pid) ->
     gen_server:call(Pid, get_socket).
@@ -83,7 +86,10 @@ handle_call({do, Request}, From, #state{socket = Socket} = State) ->
     end;
 
 handle_call(get_socket, _From, State) ->
-    {reply, {ok, State#state.socket}, State}.
+    {reply, {ok, State#state.socket}, State};
+
+handle_call(is_busy, _From, State) ->
+    {reply, {ok, State#state.caller =/= undefined}, State}.
 
 
 handle_cast(_Msg, State) ->
