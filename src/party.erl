@@ -36,7 +36,7 @@ post(URL, Headers, Body, Opts) ->
 
 
 do(Request, Opts) ->
-    Req = fun (Pid) ->
+    Req = fun (Pid, _ElapsedUs, _Misses) ->
                   party_socket:do(Pid, Request, call_timeout(Opts))
           end,
     Pool = pool_name(endpoint(url(Request))),
