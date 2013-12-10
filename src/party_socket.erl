@@ -93,6 +93,9 @@ handle_call(is_busy, _From, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+handle_info({tcp, _Socket, _Data}, #state{socket = undefined} = State) ->
+    {noreply, State};
+
 handle_info({tcp, Socket, Data}, #state{socket = Socket} = State) ->
     ok = inet:setopts(Socket, [{active, once}]),
 

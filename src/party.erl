@@ -81,4 +81,3 @@ pool_name({_Protocol, _Domain, _Port} = Endpoint) ->
 
 call_timeout(Opts) -> proplists:get_value(call_timeout, Opts, 5000).
 claim_timeout(Opts) -> proplists:get_value(claim_timeout, Opts, 1000).
-    
