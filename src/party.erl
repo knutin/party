@@ -21,7 +21,7 @@ connect(Endpoint, NumConnections) ->
             {error, {connect, Error}}
     end.
 
-disconnect(Endpoint) ->
+disconnect(_Endpoint) ->
     lists:foreach(fun ({_, Pid, _, _}) ->
                           ok = supervisor:terminate_child(party_socket_sup, Pid)
                   end, supervisor:which_children(party_socket_sup)),
@@ -36,8 +36,8 @@ post(URL, Headers, Body, Opts) ->
 
 
 do(Request, Opts) ->
-    Req = fun (Pid, _ElapsedUs, _Misses) ->
-                  party_socket:do(Pid, Request, call_timeout(Opts))
+    Req = fun (Pid, Lock, _ElapsedUs, _Misses) ->
+                  party_socket:do(Pid, Request, Lock, call_timeout(Opts))
           end,
     Pool = pool_name(endpoint(url(Request))),
     case carpool:claim(Pool, Req, claim_timeout(Opts)) of

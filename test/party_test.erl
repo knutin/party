@@ -63,8 +63,8 @@ large_response() ->
 
 reconnect() ->
     URL = <<"http://dynamodb.us-east-1.amazonaws.com/">>,
-    ok = party:connect(URL, 2),
-    [{_, Pid, _, _}, _] = supervisor:which_children(party_socket_sup),
+    ok = party:connect(URL, 1),
+    [{_, Pid, _, _}] = supervisor:which_children(party_socket_sup),
 
     {ok, Socket1} = party_socket:get_socket(Pid),
 
@@ -83,7 +83,8 @@ reconnect() ->
     {ok, Socket2} = party_socket:get_socket(Pid),
     ?assertNotEqual(Socket1, Socket2),
     ?assertMatch({ok, {{400, _}, _, _}}, party:post(URL, Close, [], [])),
-    ?assertEqual({ok, Socket2}, party_socket:get_socket(Pid)).
+    ?assertEqual({ok, Socket2}, party_socket:get_socket(Pid)),
+    ok = party:disconnect(ignored).
 
 
 
@@ -104,10 +105,11 @@ worker_busy() ->
     ?assertEqual({error, timeout}, party:post(URL, [], <<"sleep=200">>,
                                               [{server_timeout, 1000},
                                                {call_timeout, 0}])),
+    ?assertMatch([{_, true}], party:workers()),
 
-    ?assertEqual({error, busy}, party:post(URL, [], <<"sleep=2000">>,
-                                           [{server_timeout, 1000},
-                                            {call_timeout, 1000}])),
+    ?assertEqual({error, claim_timeout}, party:post(URL, [], <<"sleep=2000">>,
+                                                    [{server_timeout, 1000},
+                                                     {call_timeout, 1000}])),
     ok = party:disconnect(ignored).
 
 

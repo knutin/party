@@ -4,7 +4,7 @@
 -include("party.hrl").
 
 %% API
--export([start_link/1, do/3, is_busy/1]).
+-export([start_link/1, do/4, is_busy/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -18,7 +18,8 @@
                 response,
                 buffer,
                 parser_state,
-                timer
+                timer,
+                lock
                }).
 
 %%
@@ -28,9 +29,9 @@
 start_link(Endpoint) ->
     gen_server:start_link(?MODULE, [Endpoint], []).
 
-do(Pid, Request, Timeout) ->
+do(Pid, Request, Lock, Timeout) ->
     try
-        gen_server:call(Pid, {do, Request}, Timeout)
+        gen_server:call(Pid, {do, Request, Lock}, Timeout)
     catch
         exit:{timeout, _} ->
             {error, timeout}
@@ -61,12 +62,13 @@ init([Endpoint]) ->
             {ok, #state{endpoint = Endpoint,
                         socket = Socket,
                         parser_state = response,
-                        buffer = <<"">>}};
+                        buffer = <<"">>,
+                        lock = undefined}};
         Error ->
             {stop, Error}
     end.
 
-handle_call({do, Request}, From, #state{caller = undefined} = State) ->
+handle_call({do, Request, Lock}, From, #state{caller = undefined} = State) ->
     case maybe_connect(State#state.endpoint, State#state.socket) of
         {ok, Socket} ->
             case send_request(Request, Socket) of
@@ -74,7 +76,8 @@ handle_call({do, Request}, From, #state{caller = undefined} = State) ->
                     Timer = start_timer(server_timeout(opts(Request))),
                     {noreply, State#state{caller = From,
                                           timer = Timer,
-                                          socket = Socket}}
+                                          socket = Socket,
+                                          lock = Lock}}
             end;
         {error, _} = Error ->
             {reply, Error, State}
@@ -105,6 +108,7 @@ handle_info({tcp, Socket, Data}, #state{socket = Socket} = State) ->
             {noreply, NewState};
 
         {response, {_, Headers, _} = Response, NewState} ->
+            ok = carpool:release(State#state.lock),
             gen_server:reply(NewState#state.caller, {ok, Response}),
             erlang:cancel_timer(State#state.timer),
 
@@ -123,7 +127,8 @@ handle_info({tcp, Socket, Data}, #state{socket = Socket} = State) ->
                                      parser_state = response,
                                      socket = NewSocket,
                                      timer = undefined,
-                                     buffer = <<"">>}}
+                                     buffer = <<"">>,
+                                     lock = undefined}}
     end;
 
 handle_info({tcp_closed, Socket}, #state{socket = Socket} = State) ->
