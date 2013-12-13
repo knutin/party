@@ -97,6 +97,7 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 handle_info({tcp, _Socket, _Data}, #state{socket = undefined} = State) ->
+    error_logger:info_msg("party got tcp response too late~n"),
     {noreply, State};
 
 handle_info({tcp, Socket, Data}, #state{socket = Socket} = State) ->
@@ -132,6 +133,15 @@ handle_info({tcp, Socket, Data}, #state{socket = Socket} = State) ->
     end;
 
 handle_info({tcp_closed, Socket}, #state{socket = Socket} = State) ->
+    case State#state.lock =/= undefined orelse State#state.caller =/= undefined of
+        true ->
+            error_logger:info_msg("party_socket(~p): tcp_closed, lock: ~p, caller: ~p~n",
+                                  [self(), State#state.lock, State#state.caller]),
+            ok;
+        false ->
+            ok
+    end,
+
     {noreply, State#state{socket = undefined}};
 
 handle_info({timeout, Timer, timeout}, #state{timer = undefined} = State) ->
@@ -142,6 +152,7 @@ handle_info({timeout, Timer, timeout}, #state{timer = undefined} = State) ->
 handle_info({timeout, Timer, timeout}, #state{caller = From,
                                               socket = Socket,
                                               timer = Timer} = State) ->
+    ok = carpool:release(State#state.lock),
     gen_server:reply(From, {error, timeout}),
     if Socket =/= undefined ->
             ok = gen_tcp:close(Socket);
