@@ -133,16 +133,27 @@ handle_info({tcp, Socket, Data}, #state{socket = Socket} = State) ->
     end;
 
 handle_info({tcp_closed, Socket}, #state{socket = Socket} = State) ->
-    case State#state.lock =/= undefined orelse State#state.caller =/= undefined of
-        true ->
-            error_logger:info_msg("party_socket(~p): tcp_closed, lock: ~p, caller: ~p~n",
-                                  [self(), State#state.lock, State#state.caller]),
-            ok;
-        false ->
-            ok
-    end,
+    EmptyState = State#state{caller = undefined,
+                             response = undefined,
+                             parser_state = response,
+                             socket = undefined,
+                             timer = undefined,
+                             buffer = <<"">>,
+                             lock = undefined},
+    case State#state.caller of
+        undefined ->
+            {noreply, EmptyState};
 
-    {noreply, State#state{socket = undefined}};
+        From ->
+            case State#state.lock =/= undefined of
+                true ->
+                    ok = carpool:release(State#state.lock);
+                false ->
+                    ok
+            end,
+            gen_server:reply(From, {error, timeout}),
+            {noreply, EmptyState}
+    end;
 
 handle_info({timeout, Timer, timeout}, #state{timer = undefined} = State) ->
     error_logger:info_msg("got timeout from ~p, but don't have timer~n",
