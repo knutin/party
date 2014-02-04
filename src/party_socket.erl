@@ -117,7 +117,8 @@ handle_info({tcp, Socket, Data}, #state{socket = Socket} = State) ->
                             {<<"Connection">>, <<"close">>} ->
                                 ok = gen_tcp:close(Socket),
                                 undefined;
-                            {<<"Connection">>, <<"keep-alive">>} ->
+                            {<<"Connection">>, _} ->
+                                %% Keep alive is default for HTTP 1.1
                                 Socket;
                             false ->
                                 Socket

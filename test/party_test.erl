@@ -68,7 +68,7 @@ reconnect() ->
 
     {ok, Socket1} = party_socket:get_socket(Pid),
 
-    KeepAlive = [{<<"Connection">>, <<"keep-alive">>}],
+    KeepAlive = [],
     ?assertMatch({ok, {{400, _}, _, _}}, party:post(URL, KeepAlive, [], [])),
     ?assertEqual({ok, Socket1}, party_socket:get_socket(Pid)),
 
