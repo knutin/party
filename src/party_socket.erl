@@ -156,11 +156,6 @@ handle_info({tcp_closed, Socket}, #state{socket = Socket} = State) ->
             {noreply, EmptyState}
     end;
 
-handle_info({timeout, Timer, timeout}, #state{timer = undefined} = State) ->
-    error_logger:info_msg("got timeout from ~p, but don't have timer~n",
-                          [Timer]),
-    {noreply, State};
-
 handle_info({timeout, Timer, timeout}, #state{caller = From,
                                               socket = Socket,
                                               timer = Timer} = State) ->
@@ -175,8 +170,17 @@ handle_info({timeout, Timer, timeout}, #state{caller = From,
                           caller = undefined,
                           parser_state = response,
                           response = undefined,
-                          buffer = <<"">>}}.
+                          buffer = <<"">>}};
 
+handle_info({timeout, Timer, timeout}, #state{timer = undefined} = State) ->
+    error_logger:info_msg("got timeout from ~p, but don't have timer~n",
+                          [Timer]),
+    {noreply, State};
+
+handle_info({timeout, OtherTimer, timeout}, #state{timer = Timer} = State) ->
+    error_logger:info_msg("got timeout from ~p, but my timer is ~p~n",
+                          [OtherTimer, Timer]),
+    {noreply, State}.
 
 
 
