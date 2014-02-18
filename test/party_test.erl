@@ -66,11 +66,12 @@ reconnect() ->
     ok = party:connect(URL, 1),
     [{_, Pid, _, _}] = supervisor:which_children(party_socket_sup),
 
-    {ok, Socket1} = party_socket:get_socket(Pid),
+    ?assertEqual({ok, undefined}, party_socket:get_socket(Pid)),
 
     KeepAlive = [],
     ?assertMatch({ok, {{400, _}, _, _}}, party:post(URL, KeepAlive, [], [])),
-    ?assertEqual({ok, Socket1}, party_socket:get_socket(Pid)),
+    {ok, Socket1} = party_socket:get_socket(Pid),
+    ?assert(is_port(Socket1)),
 
     ?assertMatch({ok, {{400, _}, _, _}}, party:post(URL, KeepAlive, [], [])),
     ?assertEqual({ok, Socket1}, party_socket:get_socket(Pid)),
@@ -92,7 +93,7 @@ server_timeout() ->
     URL = <<"http://dynamodb.us-east-1.amazonaws.com/">>,
     ok = party:connect(URL, 1),
     ?assertEqual({error, timeout}, party:post(URL, [], [],
-                                              [{server_timeout, 0},
+                                              [{server_timeout, 10},
                                                {call_timeout, 1000}])),
     ok = party:disconnect(ignored).
 

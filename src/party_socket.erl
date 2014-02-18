@@ -49,24 +49,13 @@ get_socket(Pid) ->
 %%
 
 init([Endpoint]) ->
-    {_Protocol, Domain, Port} = party:endpoint(Endpoint),
+    ok = carpool:connect(party:pool_name(party:endpoint(Endpoint))),
+    {ok, #state{endpoint = Endpoint,
+                socket = undefined,
+                parser_state = response,
+                buffer = <<"">>,
+                lock = undefined}}.
 
-    %% TODO: ssl
-    case gen_tcp:connect(?b2l(Domain), Port,
-                         [{active, false}, binary],
-                         10000) of
-        {ok, Socket} ->
-            inet:setopts(Socket, [{active, once}]),
-
-            ok = carpool:connect(party:pool_name(party:endpoint(Endpoint))),
-            {ok, #state{endpoint = Endpoint,
-                        socket = Socket,
-                        parser_state = response,
-                        buffer = <<"">>,
-                        lock = undefined}};
-        Error ->
-            {stop, Error}
-    end.
 
 handle_call({do, Request, Lock}, From, #state{caller = undefined} = State) ->
     case maybe_connect(State#state.endpoint, State#state.socket) of
@@ -83,7 +72,7 @@ handle_call({do, Request, Lock}, From, #state{caller = undefined} = State) ->
             {reply, Error, State}
     end;
 
-handle_call({do, _Request}, _From, State) ->
+handle_call({do, _Request, _Lock}, _From, State) ->
     {reply, {error, busy}, State};
 
 handle_call(get_socket, _From, State) ->
@@ -143,27 +132,36 @@ handle_info({tcp_closed, Socket}, #state{socket = Socket} = State) ->
                              lock = undefined},
     case State#state.caller of
         undefined ->
-            {noreply, EmptyState};
-
+            ok;
         From ->
-            case State#state.lock =/= undefined of
-                true ->
-                    ok = carpool:release(State#state.lock);
-                false ->
-                    ok
-            end,
-            gen_server:reply(From, {error, timeout}),
-            {noreply, EmptyState}
-    end;
+            gen_server:reply(From, {error, timeout})
+    end,
+
+    case State#state.lock =/= undefined of
+        true ->
+            ok = carpool:release(State#state.lock);
+        false ->
+            ok
+    end,
+
+    case State#state.timer =/= undefined of
+        true ->
+            erlang:cancel_timer(State#state.timer);
+        false ->
+            ok
+    end,
+
+    {noreply, EmptyState};
 
 handle_info({timeout, Timer, timeout}, #state{caller = From,
                                               socket = Socket,
                                               timer = Timer} = State) ->
     ok = carpool:release(State#state.lock),
     gen_server:reply(From, {error, timeout}),
-    if Socket =/= undefined ->
+    case Socket =/= undefined of
+        true ->
             ok = gen_tcp:close(Socket);
-       true ->
+        false ->
             ok
     end,
     {noreply, State#state{socket = undefined,
