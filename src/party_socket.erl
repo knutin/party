@@ -1,6 +1,10 @@
 -module(party_socket).
 -behaviour(gen_server).
+
+-ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
+-endif.
+
 -include("party.hrl").
 
 %% API
@@ -345,6 +349,7 @@ start_timer(Timeout) ->
 %% TESTS
 %%
 
+-ifdef(TEST).
 
 path_test() ->
     ?assertEqual(<<"/hello/world">>, path(<<"http://foobar.com:80/hello/world">>)),
@@ -355,3 +360,5 @@ path_test() ->
 host_test() ->
     ?assertEqual(<<"localhost:80">>, host(<<"http://localhost:80/foobar">>)),
     ?assertEqual(<<"localhost:80">>, host(<<"http://localhost:80">>)).
+
+-endif.
