@@ -70,7 +70,11 @@ handle_call({do, Request, Lock}, From, #state{caller = undefined} = State) ->
                     {noreply, State#state{caller = From,
                                           timer = Timer,
                                           socket = Socket,
-                                          lock = Lock}}
+                                          lock = Lock}};
+                {error, einval} ->
+                    {reply, {error, timeout}, State};
+                {error, closed} ->
+                    {reply, {error, timeout}, State}
             end;
         {error, _} = Error ->
             {reply, Error, State}
